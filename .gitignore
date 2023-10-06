@@ -1,0 +1,4 @@
+/target
+*.osm.pbf
+*.xz
+*.gzip
