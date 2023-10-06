@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use osmpbfreader::OsmObj;
+use osmpbfreader::{OsmObj, Tags};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -48,15 +48,40 @@ impl<R: Read> CountingReader<R> {
     }
 }
 
-fn nice_print(addresses: usize, nodes: usize, bytes: usize, start: &Instant) {
+fn nice_print(addresses: usize, entities: usize, bytes: usize, start: &Instant) {
     eprintln!(
-        "Processed {} complete addresses; {} nodes in total; {} of input processed in {}s; {}/s in avg.",
+        "Processed {} complete addresses; {} entities in total; {} of input processed in {}s; {}/s in avg.",
         addresses,
-        nodes,
+        entities,
         human_bytes::human_bytes(bytes as f64),
         start.elapsed().as_secs(),
         human_bytes::human_bytes(bytes as f64 / start.elapsed().as_secs_f64()),
     );
+}
+
+fn process_tags(tags: Tags) -> Option<String> {
+    if tags.is_empty() {
+        return None;
+    }
+    let co = tags.get("addr:country").map(|v| v.to_string());
+    let ci = tags.get("addr:city");
+    let po = tags.get("addr:postcode");
+    let st = tags.get("addr:street");
+    let hn = tags.get("addr:housenumber");
+
+    match (co, ci, po, st, hn) {
+        (Some(co), Some(ci), Some(po), Some(st), Some(hn)) => {
+            let address = Address {
+                housenumber: hn.to_string(),
+                postcode: po.to_string(),
+                city: ci.to_string(),
+                street: st.to_string(),
+                country: co.to_string(),
+            };
+            Some(format!("{}\n", serde_json::to_string(&address).unwrap()))
+        }
+        _ => None,
+    }
 }
 
 pub fn stdin_stdout_database() -> Result<(), String> {
@@ -66,52 +91,38 @@ pub fn stdin_stdout_database() -> Result<(), String> {
 
     let mut pbf = osmpbfreader::OsmPbfReader::new(reader);
     let mut counter_addresses = 0;
-    let mut counter_nodes = 0;
+    let mut counter_entities = 0;
     let start = Instant::now();
     for obj in pbf.par_iter() {
         let obj = obj.map_err(|e| format!("{:?}", e))?;
 
-        if let OsmObj::Node(n) = obj {
-            counter_nodes += 1;
-            if n.tags.is_empty() {
-                continue;
-            }
-            let co = n.tags.get("addr:country");
-            let ci = n.tags.get("addr:city");
-            let po = n.tags.get("addr:postcode");
-            let st = n.tags.get("addr:street");
-            let hn = n.tags.get("addr:housenumber");
-
-            match (co, ci, po, st, hn) {
-                (Some(co), Some(ci), Some(po), Some(st), Some(hn)) => {
-                    let address = Address {
-                        housenumber: hn.to_string(),
-                        postcode: po.to_string(),
-                        city: ci.to_string(),
-                        street: st.to_string(),
-                        country: co.to_string(),
-                    };
-                    let text = format!("{}\n", serde_json::to_string(&address).unwrap());
-                    counter_addresses += 1;
-                    stdout
-                        .write_all(text.as_bytes())
-                        .map_err(|e| e.to_string())?;
+        let tags = match obj {
+            OsmObj::Way(w) => w.tags,
+            OsmObj::Node(n) => n.tags,
+            OsmObj::Relation(r) => r.tags,
+        };
+        counter_entities += 1;
+        match process_tags(tags) {
+            None => (),
+            Some(t) => {
+                stdout
+                    .write_all(t.as_bytes())
+                    .expect("Error writing to stdout");
+                counter_addresses += 1;
+                if counter_addresses % 1000 == 0 {
+                    nice_print(
+                        counter_addresses,
+                        counter_entities,
+                        *bytes_read.lock().unwrap(),
+                        &start,
+                    );
                 }
-                _ => continue,
-            }
-            if counter_addresses % 1000 == 0 {
-                nice_print(
-                    counter_addresses,
-                    counter_nodes,
-                    *bytes_read.lock().unwrap(),
-                    &start,
-                );
             }
         }
     }
     nice_print(
         counter_addresses,
-        counter_nodes,
+        counter_entities,
         *bytes_read.lock().unwrap(),
         &start,
     );
