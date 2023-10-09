@@ -7,8 +7,8 @@ use std::{
 use osmpbfreader::{OsmObj, Tags};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
-struct Address {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Address {
     pub country: String,
     pub city: String,
     pub postcode: String,
