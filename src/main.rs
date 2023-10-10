@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{thread::sleep, time::Duration};
 
 use build_database::stdin_stdout_database;
 use clap::Parser;
-use serve::serve;
+use serve::build;
 
 mod build_database;
 mod serve;
@@ -38,6 +38,12 @@ fn main() {
                 Ok(()) => eprintln!("Done!"),
             }
         }
-        Subcommand::Serve(_) => serve(),
+        Subcommand::Serve(_) => {
+            let mut _res = build().unwrap();
+            println!("Shrink in 10s");
+            sleep(Duration::from_secs(20));
+            _res.shrink();
+            sleep(Duration::from_secs(900));
+        },
     }
 }
