@@ -1,4 +1,4 @@
-use std::{thread::sleep, time::Duration};
+use std::{thread::sleep, time::Duration, mem::size_of};
 
 use build_database::stdin_stdout_database;
 use clap::Parser;
@@ -6,6 +6,7 @@ use serve::build;
 
 mod build_database;
 mod serve;
+mod sorted_vec;
 
 #[derive(Parser, Debug)]
 struct BuildParameters {}
@@ -26,8 +27,19 @@ struct Args {
     pub build: Subcommand,
 }
 
+enum CompactAdd {
+    Data((u8, [u8; 14])),
+    Heap(Box<Vec<u8>>),
+}
+
 fn main() {
     let args = Args::parse();
+
+    println!("Sizeof usize: {}", size_of::<usize>());
+    println!("Sizeof vec: {}", size_of::<Vec<String>>());
+    println!("Sizeof Box: {}", size_of::<Box<Vec<String>>>());
+    println!("Sizeof CompactAdd: {}", size_of::<CompactAdd>());
+    return;
 
     match args.build {
         Subcommand::Build(_) => {
@@ -39,11 +51,9 @@ fn main() {
             }
         }
         Subcommand::Serve(_) => {
-            let mut _res = build().unwrap();
-            println!("Shrink in 10s");
-            sleep(Duration::from_secs(20));
-            _res.shrink();
-            sleep(Duration::from_secs(900));
+            let mut res = build().unwrap();
+            let x = res.len();
+            eprintln!("Street count: {}", x);
         },
     }
 }

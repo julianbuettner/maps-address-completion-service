@@ -2,9 +2,11 @@ use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     hash::Hasher,
     io::{self, BufRead, BufReader, Read},
+    thread::sleep,
+    time::Duration,
 };
 
-use crate::build_database::Address;
+use crate::{build_database::Address, sorted_vec::SortedVec};
 
 pub fn iter_items(io: impl Read) -> impl Iterator<Item = Result<Address, String>> {
     let buf_reader = BufReader::new(io);
@@ -18,6 +20,28 @@ pub fn iter_items(io: impl Read) -> impl Iterator<Item = Result<Address, String>
             },
             Err(e) => Err(e.to_string()),
         })
+}
+
+// 99.99453% of all European house numbers
+// are 15 bytes or shorter.
+// std::mem::size_of<_>() == 16
+pub enum Housenumber {
+    Stack((u8, [u8; 14])),
+    Heap(Box<Vec<u8>>),
+}
+
+impl From<String> for Housenumber {
+    fn from(value: String) -> Self {
+        if value.len() <= 14 {
+            let mut c = [0; 14];
+            for (i, v) in value.as_bytes().iter().enumerate() {
+                c[i] = *v;
+            }
+            Housenumber::Stack((value.len() as u8, c))
+        } else {
+            Housenumber::Heap(Box::new(value.as_bytes().to_vec()))
+        }
+    }
 }
 
 type Housenumbers = Vec<String>;
@@ -149,21 +173,47 @@ fn hash(data: &str) -> u64 {
     hasher.finish()
 }
 
-pub fn build() -> Result<World, String> {
+pub fn build() -> Result<SortedVec<String>, String> {
     eprintln!("Reading jsonl from stdin...");
     let stdin = io::stdin().lock();
 
     let it = iter_items(stdin);
 
-    println!("Collect addresses...");
+    eprintln!("Collect addresses...");
     let mut world = World::new();
+    let mut streets = SortedVec::new();
+    let mut housenumber_count: HashMap<usize, usize> = HashMap::new();
     for (i, address) in it.enumerate() {
         let address = address?;
         if i % 1000 == 0 {
-            println!("Insert address no {}", i);
+            eprintln!("Insert address no {} - {}", i, streets.len());
+            eprintln!("Entries:{}", housenumber_count.len());
         }
-        world.insert_address(address);
+        // world.insert_address(address);
+        // if !streets.contains(&address.street) {
+        //     println!("{}", address.street);
+        //     streets.insert(address.street);
+        // }
+        housenumber_count.insert(
+            address.housenumber.as_bytes().len(),
+            housenumber_count
+                .get(&address.housenumber.as_bytes().len())
+                .unwrap_or(&0)
+                + 1,
+        );
     }
 
-    Ok(world)
+    let mut kv: Vec<(usize, usize)> = housenumber_count.into_iter().collect();
+    kv.sort_by(|(a, b), (c, d)| a.cmp(c));
+    for (length, count) in kv.iter() {
+        println!("{}: {} times", length, count);
+    }
+
+    let total: usize = kv.iter().map(|(_, b)| b).sum();
+    for i in 0..110 {
+        let partition: usize = kv.iter().filter(|(a, _)| a <= &(i as usize)).map(|(_, b)| b).sum();
+        println!("Count up to including {}: {} making {}% of total", i, partition, 100. * partition as f32 / total as f32);
+    }
+
+    Ok(streets)
 }

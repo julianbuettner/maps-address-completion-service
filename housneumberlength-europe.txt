@@ -1,0 +1,178 @@
+1: 5761711 times
+2: 11902831 times
+3: 2641249 times
+4: 385284 times
+5: 212366 times
+6: 309524 times
+7: 177387 times
+8: 32499 times
+9: 6206 times
+10: 1917 times
+11: 1391 times
+12: 502 times
+13: 476 times
+14: 432 times
+15: 310 times
+16: 133 times
+17: 228 times
+18: 155 times
+19: 81 times
+20: 66 times
+21: 53 times
+22: 67 times
+23: 75 times
+24: 24 times
+25: 19 times
+26: 39 times
+27: 20 times
+28: 20 times
+29: 24 times
+30: 15 times
+31: 20 times
+32: 7 times
+33: 9 times
+34: 5 times
+35: 9 times
+36: 3 times
+37: 5 times
+38: 9 times
+39: 10 times
+40: 4 times
+41: 6 times
+42: 6 times
+43: 6 times
+44: 5 times
+45: 6 times
+46: 1 times
+47: 8 times
+48: 2 times
+51: 2 times
+52: 2 times
+54: 1 times
+55: 2 times
+56: 1 times
+60: 1 times
+62: 1 times
+63: 2 times
+67: 2 times
+68: 1 times
+75: 2 times
+79: 1 times
+82: 1 times
+83: 4 times
+90: 1 times
+94: 2 times
+95: 2 times
+100: 1 times
+104: 1 times
+107: 1 times
+Count up to including 0: 0 making 0% of total
+Count up to including 1: 5761711 making 26.879599% of total
+Count up to including 2: 17664542 making 82.40882% of total
+Count up to including 3: 20305791 making 94.73081% of total
+Count up to including 4: 20691075 making 96.528244% of total
+Count up to including 5: 20903441 making 97.51897% of total
+Count up to including 6: 21212965 making 98.96296% of total
+Count up to including 7: 21390352 making 99.79051% of total
+Count up to including 8: 21422851 making 99.94213% of total
+Count up to including 9: 21429057 making 99.97108% of total
+Count up to including 10: 21430974 making 99.98002% of total
+Count up to including 11: 21432365 making 99.9865% of total
+Count up to including 12: 21432867 making 99.98886% of total
+Count up to including 13: 21433343 making 99.99108% of total
+Count up to including 14: 21433775 making 99.993095% of total
+Count up to including 15: 21434085 making 99.99453% of total
+Count up to including 16: 21434218 making 99.995155% of total
+Count up to including 17: 21434446 making 99.99622% of total
+Count up to including 18: 21434601 making 99.99694% of total
+Count up to including 19: 21434682 making 99.99732% of total
+Count up to including 20: 21434748 making 99.99763% of total
+Count up to including 21: 21434801 making 99.99788% of total
+Count up to including 22: 21434868 making 99.99819% of total
+Count up to including 23: 21434943 making 99.99854% of total
+Count up to including 24: 21434967 making 99.99866% of total
+Count up to including 25: 21434986 making 99.99874% of total
+Count up to including 26: 21435025 making 99.99892% of total
+Count up to including 27: 21435045 making 99.99901% of total
+Count up to including 28: 21435065 making 99.99911% of total
+Count up to including 29: 21435089 making 99.999214% of total
+Count up to including 30: 21435104 making 99.99929% of total
+Count up to including 31: 21435124 making 99.99939% of total
+Count up to including 32: 21435131 making 99.99942% of total
+Count up to including 33: 21435140 making 99.99946% of total
+Count up to including 34: 21435145 making 99.99947% of total
+Count up to including 35: 21435154 making 99.99953% of total
+Count up to including 36: 21435157 making 99.999535% of total
+Count up to including 37: 21435162 making 99.99956% of total
+Count up to including 38: 21435171 making 99.99961% of total
+Count up to including 39: 21435181 making 99.99964% of total
+Count up to including 40: 21435185 making 99.999664% of total
+Count up to including 41: 21435191 making 99.9997% of total
+Count up to including 42: 21435197 making 99.99972% of total
+Count up to including 43: 21435203 making 99.999756% of total
+Count up to including 44: 21435208 making 99.99977% of total
+Count up to including 45: 21435214 making 99.9998% of total
+Count up to including 46: 21435215 making 99.99981% of total
+Count up to including 47: 21435223 making 99.999855% of total
+Count up to including 48: 21435225 making 99.999855% of total
+Count up to including 49: 21435225 making 99.999855% of total
+Count up to including 50: 21435225 making 99.999855% of total
+Count up to including 51: 21435227 making 99.99987% of total
+Count up to including 52: 21435229 making 99.99987% of total
+Count up to including 53: 21435229 making 99.99987% of total
+Count up to including 54: 21435230 making 99.99988% of total
+Count up to including 55: 21435232 making 99.999886% of total
+Count up to including 56: 21435233 making 99.999886% of total
+Count up to including 57: 21435233 making 99.999886% of total
+Count up to including 58: 21435233 making 99.999886% of total
+Count up to including 59: 21435233 making 99.999886% of total
+Count up to including 60: 21435234 making 99.9999% of total
+Count up to including 61: 21435234 making 99.9999% of total
+Count up to including 62: 21435235 making 99.99991% of total
+Count up to including 63: 21435237 making 99.99991% of total
+Count up to including 64: 21435237 making 99.99991% of total
+Count up to including 65: 21435237 making 99.99991% of total
+Count up to including 66: 21435237 making 99.99991% of total
+Count up to including 67: 21435239 making 99.99992% of total
+Count up to including 68: 21435240 making 99.99992% of total
+Count up to including 69: 21435240 making 99.99992% of total
+Count up to including 70: 21435240 making 99.99992% of total
+Count up to including 71: 21435240 making 99.99992% of total
+Count up to including 72: 21435240 making 99.99992% of total
+Count up to including 73: 21435240 making 99.99992% of total
+Count up to including 74: 21435240 making 99.99992% of total
+Count up to including 75: 21435242 making 99.99994% of total
+Count up to including 76: 21435242 making 99.99994% of total
+Count up to including 77: 21435242 making 99.99994% of total
+Count up to including 78: 21435242 making 99.99994% of total
+Count up to including 79: 21435243 making 99.99994% of total
+Count up to including 80: 21435243 making 99.99994% of total
+Count up to including 81: 21435243 making 99.99994% of total
+Count up to including 82: 21435244 making 99.99994% of total
+Count up to including 83: 21435248 making 99.99996% of total
+Count up to including 84: 21435248 making 99.99996% of total
+Count up to including 85: 21435248 making 99.99996% of total
+Count up to including 86: 21435248 making 99.99996% of total
+Count up to including 87: 21435248 making 99.99996% of total
+Count up to including 88: 21435248 making 99.99996% of total
+Count up to including 89: 21435248 making 99.99996% of total
+Count up to including 90: 21435249 making 99.99996% of total
+Count up to including 91: 21435249 making 99.99996% of total
+Count up to including 92: 21435249 making 99.99996% of total
+Count up to including 93: 21435249 making 99.99996% of total
+Count up to including 94: 21435251 making 99.999985% of total
+Count up to including 95: 21435253 making 99.999985% of total
+Count up to including 96: 21435253 making 99.999985% of total
+Count up to including 97: 21435253 making 99.999985% of total
+Count up to including 98: 21435253 making 99.999985% of total
+Count up to including 99: 21435253 making 99.999985% of total
+Count up to including 100: 21435254 making 99.99999% of total
+Count up to including 101: 21435254 making 99.99999% of total
+Count up to including 102: 21435254 making 99.99999% of total
+Count up to including 103: 21435254 making 99.99999% of total
+Count up to including 104: 21435255 making 100% of total
+Count up to including 105: 21435255 making 100% of total
+Count up to including 106: 21435255 making 100% of total
+Count up to including 107: 21435256 making 100% of total
+Count up to including 108: 21435256 making 100% of total
+Count up to including 109: 21435256 making 100% of total
