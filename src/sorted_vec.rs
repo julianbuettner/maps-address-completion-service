@@ -1,7 +1,9 @@
 use std::ops::Deref;
 
+use serde::{Serialize, Deserialize};
 
-pub struct SortedVec<T> (Vec<T>);
+#[derive(Serialize, Deserialize)]
+pub struct SortedVec<T>(Vec<T>);
 
 impl<T: Ord> SortedVec<T> {
     pub fn new() -> Self {
@@ -14,6 +16,15 @@ impl<T: Ord> SortedVec<T> {
         };
         self.0.insert(i, e);
     }
+    pub fn insert_if_not_containing(&mut self, e: T) {
+        match self.0.binary_search(&e) {
+            Err(i) => self.0.insert(0, e),
+            Ok(_) => (),
+        }
+    }
+    pub fn index_of(&self, e: &T) -> Option<usize> {
+        self.0.binary_search(e).ok()
+    }
     pub fn contains(&self, e: &T) -> bool {
         self.0.binary_search(e).is_ok()
     }
@@ -24,5 +35,12 @@ impl<T> Deref for SortedVec<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl<T: Ord> From<Vec<T>> for SortedVec<T> {
+    fn from(mut value: Vec<T>) -> Self {
+        value.sort();
+        Self(value)
     }
 }

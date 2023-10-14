@@ -1,11 +1,12 @@
-use std::{thread::sleep, time::Duration, mem::size_of};
+use std::{mem::size_of, thread::sleep, time::Duration};
 
-use build_database::stdin_stdout_database;
+use parse::stdin_stdout_database;
 use clap::Parser;
-use serve::build;
 
-mod build_database;
-mod serve;
+use crate::compress::read_and_compress;
+
+mod parse;
+mod compress;
 mod sorted_vec;
 
 #[derive(Parser, Debug)]
@@ -15,9 +16,13 @@ struct BuildParameters {}
 struct ServeParameters {}
 
 #[derive(Parser, Debug)]
+struct CompressParamters {}
+
+#[derive(Parser, Debug)]
 enum Subcommand {
-    Build(BuildParameters),
+    Parse(BuildParameters),
     Serve(ServeParameters),
+    Compress(CompressParamters),
 }
 
 #[derive(Parser, Debug)]
@@ -35,14 +40,8 @@ enum CompactAdd {
 fn main() {
     let args = Args::parse();
 
-    println!("Sizeof usize: {}", size_of::<usize>());
-    println!("Sizeof vec: {}", size_of::<Vec<String>>());
-    println!("Sizeof Box: {}", size_of::<Box<Vec<String>>>());
-    println!("Sizeof CompactAdd: {}", size_of::<CompactAdd>());
-    return;
-
     match args.build {
-        Subcommand::Build(_) => {
+        Subcommand::Parse(_) => {
             eprintln!("Reading osm.pbf from stdin...");
             let x = stdin_stdout_database();
             match x {
@@ -51,9 +50,10 @@ fn main() {
             }
         }
         Subcommand::Serve(_) => {
-            let mut res = build().unwrap();
-            let x = res.len();
-            eprintln!("Street count: {}", x);
-        },
+            todo!()
+        }
+        Subcommand::Compress(_) => {
+            if let Err(e) = read_and_compress().unwrap();
+        }
     }
 }
