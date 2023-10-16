@@ -1,7 +1,8 @@
 # Maps address completion service
 
-Get autocompletions for e.g. web forms,
-where one types one's address, and gets completion suggestion.
+Serve auto completions for addresses,
+like city names, zip codes, street names and house numbers.
+Useful for e.g. webforms where a valid address has to be manually entered.
 
 ## Feature
 - Works on OpenStreetMaps data

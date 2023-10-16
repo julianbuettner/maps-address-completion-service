@@ -1,9 +1,11 @@
 [package]
 name = "macs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+homepage = "https://github.com/julianbuettner/maps-address-completion-service"
+authors = ["Julian Büttner <git@julianbuettner.dev>"]
+description = "Serve city names, zip codes, street names and house numbers for auto completion"
+license = "MIT"
 
 [dependencies]
 axum = "0.6.20"
