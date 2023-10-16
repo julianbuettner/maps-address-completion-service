@@ -4,6 +4,7 @@ use std::{
     time::Instant,
 };
 
+use log::info;
 use osmpbfreader::{OsmObj, Tags};
 use serde::{Deserialize, Serialize};
 
@@ -49,7 +50,7 @@ impl<R: Read> CountingReader<R> {
 }
 
 fn nice_print(addresses: usize, entities: usize, bytes: usize, start: &Instant) {
-    eprintln!(
+    info!(
         "Processed {} complete addresses; {} entities in total; {} of input processed in {}s; {}/s in avg.",
         addresses,
         entities,

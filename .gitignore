@@ -2,3 +2,7 @@
 *.osm.pbf
 *.xz
 *.gzip
+*.world
+*.log
+*.txt
+*.jsonl

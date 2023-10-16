@@ -1,19 +1,34 @@
-use std::{mem::size_of, thread::sleep, time::Duration};
+#![doc = include_str!("../README.md")]
+use std::{net::IpAddr, path::PathBuf};
 
-use parse::stdin_stdout_database;
 use clap::Parser;
+use log::{error, info};
+use parse::stdin_stdout_database;
+use serve::serve;
 
 use crate::compress::read_and_compress;
 
-mod parse;
+mod api;
 mod compress;
+mod parse;
+mod serve;
 mod sorted_vec;
+
+
+pub const MAX_ITEMS: usize = usize::MAX;
 
 #[derive(Parser, Debug)]
 struct BuildParameters {}
 
 #[derive(Parser, Debug)]
-struct ServeParameters {}
+struct ServeParameters {
+    #[arg(short, long)]
+    world: PathBuf,
+    #[arg(short, long, default_value = "3000")]
+    port: u16,
+    #[arg(short, long, default_value = "127.0.0.1")]
+    ip: IpAddr,
+}
 
 #[derive(Parser, Debug)]
 struct CompressParamters {}
@@ -32,28 +47,42 @@ struct Args {
     pub build: Subcommand,
 }
 
-enum CompactAdd {
-    Data((u8, [u8; 14])),
-    Heap(Box<Vec<u8>>),
+fn setup_logger() {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{} {} {}] {}",
+                humantime::format_rfc3339_seconds(std::time::SystemTime::now()),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .level(log::LevelFilter::Info)
+        .chain(std::io::stderr())
+        .apply()
+        .unwrap()
 }
 
-fn main() {
+fn main() -> Result<(), ()> {
+    setup_logger();
     let args = Args::parse();
 
     match args.build {
         Subcommand::Parse(_) => {
-            eprintln!("Reading osm.pbf from stdin...");
+            info!("Reading osm.pbf from stdin...");
             let x = stdin_stdout_database();
             match x {
-                Err(e) => eprintln!("Error: {}", e),
-                Ok(()) => eprintln!("Done!"),
+                Err(e) => error!("{}", e),
+                Ok(()) => info!("Done!"),
             }
         }
-        Subcommand::Serve(_) => {
-            todo!()
-        }
+        Subcommand::Serve(parameters) => serve(parameters.world, parameters.ip, parameters.port),
         Subcommand::Compress(_) => {
-            if let Err(e) = read_and_compress().unwrap();
+            if let Err(e) = read_and_compress() {
+                error!("{}", e)
+            }
         }
     }
+    Ok(())
 }
