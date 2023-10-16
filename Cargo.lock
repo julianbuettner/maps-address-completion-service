@@ -756,7 +756,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "macs"
+name = "maps-address-completion-service"
 version = "0.1.1"
 dependencies = [
  "axum",

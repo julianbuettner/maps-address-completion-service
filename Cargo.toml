@@ -1,11 +1,15 @@
 [package]
-name = "macs"
+name = "maps-address-completion-service"
 version = "0.1.1"
 edition = "2021"
 homepage = "https://github.com/julianbuettner/maps-address-completion-service"
 authors = ["Julian Büttner <git@julianbuettner.dev>"]
 description = "Serve city names, zip codes, street names and house numbers for auto completion"
 license = "MIT"
+
+[[bin]]
+name = "macs"
+path = "src/main.rs"
 
 [dependencies]
 axum = "0.6.20"

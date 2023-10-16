@@ -18,10 +18,10 @@ Useful for e.g. webforms where a valid address has to be manually entered.
 ## TLDR
 ```
 cargo install maps-address-completion-service
-curl -s https://download.geofabrik.de/europe/norway-latest.osm.pbf |
+curl -s https://download.geofabrik.de/europe/greece-latest.osm.pbf |
     macs parse |
-    macs compress > norway.world
-macs serve --world norway.world
+    macs compress > greece.world
+macs serve --world greece.world
 ```
 
 ## Workflow of this application
@@ -47,10 +47,10 @@ You can download maps from the [Geofabrik](https://download.geofabrik.de/-) site
 There are entire continents as well as just regions.
 
 ```bash
-wget https://download.geofabrik.de/europe/great-britain-latest.osm.pbf -O great-britian.osm.pbf
-cat great-britian.osm.pbf | macs parse > map.jsonl
+wget https://download.geofabrik.de/europe/great-britain-latest.osm.pbf -O great-britain.osm.pbf
+cat great-britain.osm.pbf | macs parse > map.jsonl
 # Or compress it directly
-cat great-britian.osm.pbf | macs parse | xz > maps.jsonl.xz
+cat great-britain.osm.pbf | macs parse | xz > maps.jsonl.xz
 ```
 
 ### 2. Compress into custom data structure
@@ -59,8 +59,8 @@ The resulting object it pretty much a memory representation of the final structu
 and will therefore be a good index for how much memory will be consumed.
 
 ```bash
-cat maps.jsonl | macs compress > great-britian.world
-ls -lah great-britian.world
+cat maps.jsonl | macs compress > great-britain.world
+ls -lah great-britain.world
 ```
 
 ### 3. Server via HTTP
@@ -68,8 +68,13 @@ ls -lah great-britian.world
 The server can be startet with
 
 ```bash
-macs serve -w great-britian.world
-macs serve --world great-britian.world --port 3000 --ip 127.0.0.1
+macs serve -w great-britain.world
+macs serve --world great-britain.world --port 3000 --ip 127.0.0.1
+```
+```
+[2023-10-16T22:45:11Z INFO macs::serve] Loading from world file "gb.world"...
+[2023-10-16T22:45:11Z INFO macs::serve] World loadded, containing 3 countries.
+[2023-10-16T22:45:11Z INFO macs::serve] Serve on 127.0.0.1:3000...
 ```
 Now we can query:
 ```
@@ -93,8 +98,8 @@ These all relate to OSM data, which for example maps barely
 the most important cities in Africa. It also
 injects faulty data.
 
-- The europe world struct is 169MiB big
-- The entire world struct is 203MiB big
+- The europe world struct is 169MiB
+- The entire world struct is 203MiB
 - The entire world has ca. 26 Mio addresses
 - The entire world has ca. 736.000 unique street names
 - The entire world has ca. 378.000 unique house numbers which are not just integers (e.g. 1A)
