@@ -13,6 +13,8 @@ Useful for e.g. webforms where a valid address has to be entered manually.
 - Serve address of the entire globe* with 302MiB memory
 - 1s - 2s startup time to load all OSM addresses in existence
 
+\* OSM data is missing many cities, so it's very much incomplete.
+
 ## TLDR
 ```
 cargo install maps-address-completion-service
