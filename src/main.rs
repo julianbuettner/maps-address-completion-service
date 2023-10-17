@@ -15,7 +15,7 @@ mod serve;
 mod sorted_vec;
 
 
-pub const MAX_ITEMS: usize = usize::MAX;
+pub const MAX_ITEMS_HEADER: &str = "max-items";
 
 #[derive(Parser, Debug)]
 struct BuildParameters {}

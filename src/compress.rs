@@ -36,7 +36,7 @@ fn normalize_address(a: Address) -> Address {
 }
 
 fn autocorrect_country_code(c: String) -> String {
-    if let Ok(_) = CountryCode::from_str(c.as_str()) {
+    if CountryCode::from_str(c.as_str()).is_ok() {
         c
     } else {
         for code in ALL_CODES {
@@ -197,8 +197,9 @@ impl City {
     }
     pub fn get_postal_area(&self, zip: &str) -> Option<&PostalArea> {
         self.areas
-            .iter()
-            .find(|c| c.code.to_lowercase() == zip.to_lowercase())
+            .binary_search_by_key(&zip.to_lowercase(), |c| c.code.to_lowercase())
+            .ok()
+            .map(|i| &self.areas[i])
     }
 }
 
@@ -239,8 +240,9 @@ impl Country {
     }
     pub fn get_city(&self, city_name: &str) -> Option<&City> {
         self.cities
-            .iter()
-            .find(|c| c.name.to_lowercase() == city_name.to_lowercase())
+            .binary_search_by_key(&city_name.to_lowercase(), |c| c.name.to_lowercase())
+            .ok()
+            .map(|i| &self.cities[i])
     }
 }
 
@@ -319,8 +321,9 @@ impl World {
     }
     pub fn get_country(&self, country_code: String) -> Option<&Country> {
         self.countries
-            .iter()
-            .find(|c| c.code.to_lowercase() == country_code.to_lowercase())
+            .binary_search_by_key(&country_code.to_uppercase(), |c| c.code.to_uppercase())
+            .ok()
+            .map(|i| &self.countries[i])
     }
 }
 
