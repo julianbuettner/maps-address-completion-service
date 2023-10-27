@@ -15,10 +15,6 @@ use osmpbfreader::{Node, NodeId, OsmObj, OsmPbfReader, Tags, Way};
 use serde::{Deserialize, Serialize};
 use smartstring::{LazyCompact, SmartString};
 
-use crate::sorted_vec::SortedVec;
-
-const ADDRESS_WAYS_BATCH_SIZE: usize = 4_000_000;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IncompleteAddressCoord {
     pub country: Option<SmartString<LazyCompact>>,
@@ -41,6 +37,10 @@ impl IncompleteAddressCoord {
             long,
             lat,
         }
+    }
+    pub fn from_tags_and_coords(t: Tags, long: i32, lat: i32) -> Option<Self> {
+        let inc = IncompleteAddress::from_tags(t)?;
+        Some(Self::from_incomplete_address_and_coords(inc, long, lat))
     }
 }
 
@@ -75,51 +75,6 @@ fn avg_coords(it: impl Iterator<Item = Option<(i32, i32)>>) -> Option<(i32, i32)
         b += bb as i64;
     }
     Some(((a / count) as i32, (b / count) as i32))
-}
-
-struct IncompleteWay {
-    pub addr: IncompleteAddress,
-    pub node_ids: Vec<NodeId>,
-    pub coords: Vec<Option<(i32, i32)>>,
-}
-
-impl IncompleteWay {
-    pub fn new(way: Way) -> Self {
-        let mut node_ids = way.nodes;
-        node_ids.sort();
-        node_ids.dedup();
-        Self {
-            coords: vec![None; node_ids.len()],
-            addr: IncompleteAddress::from_tags(way.tags).unwrap(),
-            node_ids,
-        }
-    }
-    pub fn min_unapplied(&self) -> Option<i64> {
-        self.coords
-            .iter()
-            .zip(self.node_ids.iter())
-            .filter(|(coord, _id)| coord.is_none())
-            .map(|(_coord, id)| id.0)
-            .min()
-    }
-    pub fn apply(&mut self, node: Node) -> Result<(), ()> {
-        let index = self
-            .node_ids
-            .iter()
-            .position(|f| f.0 == node.id.0)
-            .ok_or(())?;
-        self.coords[index] = Some((node.decimicro_lon, node.decimicro_lat));
-        Ok(())
-    }
-    pub fn to_incomplete_address_coord(self) -> Result<IncompleteAddressCoord, Self> {
-        let coords = avg_coords(self.coords.iter().copied());
-        match coords {
-            None => Err(self),
-            Some((long, lat)) => Ok(IncompleteAddressCoord::from_incomplete_address_and_coords(
-                self.addr, long, lat,
-            )),
-        }
-    }
 }
 
 struct CountingReader<R: Read> {
@@ -223,8 +178,8 @@ fn nice_print_pass_two(
         required_node_ids_collected,
         ways_matched,
         entities,
-        human_bytes::human_bytes(bytes as f64),
         way_backlog,
+        human_bytes::human_bytes(bytes as f64),
         start.elapsed().as_secs(),
         human_bytes::human_bytes(bytes as f64 / start.elapsed().as_secs_f64()),
     );
@@ -278,6 +233,9 @@ pub fn pass_one<R: Read>(
         match obj {
             OsmObj::Relation(_) => (), // ignore relations
             OsmObj::Way(way) => {
+                if !is_address(&way.tags) {
+                    continue;
+                }
                 address_way_count += 1;
                 for node_id in way.nodes.into_iter() {
                     node_ids_required_by_ways.insert(node_id.0);
@@ -285,22 +243,24 @@ pub fn pass_one<R: Read>(
             }
             OsmObj::Node(node) => {
                 address_node_count += 1;
-                let tags = node.tags;
-                let inc = IncompleteAddressCoord {
-                    housenumber: tags.get("addr:housenumber").cloned().unwrap(),
-                    street: tags.get("addr:street").cloned().unwrap(),
-                    zip: tags.get("addr:postcode").cloned(),
-                    city: tags.get("addr:postcode").cloned(),
-                    country: tags.get("addr:postcode").cloned(),
-                    lat: node.decimicro_lat,
-                    long: node.decimicro_lon,
-                };
+                let inc = IncompleteAddressCoord::from_incomplete_address_and_coords(
+                    IncompleteAddress::from_tags(node.tags).unwrap(),
+                    node.decimicro_lon,
+                    node.decimicro_lat,
+                );
                 out_inc_addr_coord(out, &inc)?;
             }
         }
     }
     Ok(node_ids_required_by_ways)
 }
+
+// fn process_backlog(backlog: Vec<Way>, node_coordinates: HashMap<i64, (i32, i32)>) -> Result<Vec<Way>, String> {
+//     let mut new_backlog = Vec::new();
+//     for way in backlog {
+//     }
+//     Ok(backlog)
+// }
 
 fn pass_two<R: Read + Seek>(
     pbf: &mut OsmPbfReader<R>,
@@ -330,17 +290,12 @@ fn pass_two<R: Read + Seek>(
             )
         }
         let obj = obj.map_err(|e| format!("{:?}", e))?;
-        let tags = match &obj {
-            OsmObj::Way(w) => &w.tags,
-            OsmObj::Node(n) => &n.tags,
-            OsmObj::Relation(r) => &r.tags,
-        };
-        if !is_address(&tags) {
-            continue;
-        }
         match obj {
             OsmObj::Relation(_) => (),
             OsmObj::Way(way) => {
+                if !is_address(&way.tags) {
+                    continue;
+                }
                 let node_coordinates = way
                     .nodes
                     .iter()
@@ -352,24 +307,20 @@ fn pass_two<R: Read + Seek>(
                     continue;
                 }
                 ways_matched += 1;
-                let (decimicro_lat, decimicro_lon) = average_coordinates.unwrap();
-                let tags = way.tags;
-                let inc = IncompleteAddressCoord {
-                    housenumber: tags.get("addr:housenumber").cloned().unwrap(),
-                    street: tags.get("addr:street").cloned().unwrap(),
-                    zip: tags.get("addr:postcode").cloned(),
-                    city: tags.get("addr:postcode").cloned(),
-                    country: tags.get("addr:postcode").cloned(),
-                    lat: decimicro_lat,
-                    long: decimicro_lon,
-                };
+                let (decimicro_lon, decimicro_lat) = average_coordinates.unwrap();
+                let inc = IncompleteAddressCoord::from_tags_and_coords(
+                    way.tags,
+                    decimicro_lon,
+                    decimicro_lat,
+                )
+                .unwrap();
                 out_inc_addr_coord(out, &inc)?;
             }
             OsmObj::Node(node) => {
                 if node_ids_required_by_ways.contains(&node.id.0) {
                     required_node_ids_collected += 1;
                     node_coordinates.insert(node.id.0, (node.decimicro_lon, node.decimicro_lat));
-                }
+                } 
             }
         }
     }
@@ -381,20 +332,16 @@ fn pass_two<R: Read + Seek>(
             .map(|NodeId(node_id)| node_coordinates.get(node_id).map(|(a, b)| (*a, *b)));
         let average_coordinates = avg_coords(node_coordinates);
         if average_coordinates.is_none() {
-            return Err(format!("Way {} is missing node coordinates! Corrupt *osm.pbf?", way.id.0));
+            return Err(format!(
+                "Way {} is missing node coordinates! Corrupt *osm.pbf?",
+                way.id.0
+            ));
         }
         ways_matched += 1;
         let (decimicro_lat, decimicro_lon) = average_coordinates.unwrap();
-        let tags = way.tags;
-        let inc = IncompleteAddressCoord {
-            housenumber: tags.get("addr:housenumber").cloned().unwrap(),
-            street: tags.get("addr:street").cloned().unwrap(),
-            zip: tags.get("addr:postcode").cloned(),
-            city: tags.get("addr:postcode").cloned(),
-            country: tags.get("addr:postcode").cloned(),
-            lat: decimicro_lat,
-            long: decimicro_lon,
-        };
+        let inc =
+            IncompleteAddressCoord::from_tags_and_coords(way.tags, decimicro_lon, decimicro_lat)
+                .unwrap();
         out_inc_addr_coord(out, &inc)?;
     }
 
