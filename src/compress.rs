@@ -9,25 +9,26 @@ use codes_iso_3166::part_1::{CountryCode, ALL_CODES};
 use log::info;
 use serde::{Deserialize, Serialize};
 
-use crate::{parse::Address, sorted_vec::SortedVec};
+use crate::{
+    autofix::{try_autofixing},
+    parse::{Address, IncompleteAddress},
+    sorted_vec::SortedVec,
+};
 
-pub fn iter_items(io: impl Read) -> impl Iterator<Item = Result<Address, String>> {
+pub fn iter_items(io: impl Read) -> impl Iterator<Item = Result<IncompleteAddress, String>> {
     let buf_reader = BufReader::new(io);
-    buf_reader
-        .lines()
-        // .map(|l| l.map_err(|e| e.to_string()).map(|v| serde_json::from_str(v.as_str())))
-        .map(|line| match line {
-            Ok(text) => match serde_json::from_str::<Address>(text.as_str()) {
-                Ok(addr) => Ok(normalize_address(addr)),
-                Err(e) => Err(e.to_string()),
-            },
+    buf_reader.lines().map(|line| match line {
+        Ok(text) => match serde_json::from_str::<IncompleteAddress>(text.as_str()) {
+            Ok(addr) => Ok(normalize_address(addr)),
             Err(e) => Err(e.to_string()),
-        })
+        },
+        Err(e) => Err(e.to_string()),
+    })
 }
 
-fn normalize_address(a: Address) -> Address {
-    Address {
-        country: autocorrect_country_code(a.country),
+fn normalize_address(a: IncompleteAddress) -> IncompleteAddress {
+    IncompleteAddress {
+        country: a.country.map(autocorrect_country_code),
         city: a.city,
         postcode: a.postcode,
         street: a.street,
@@ -72,19 +73,19 @@ pub struct Street {
 
 #[derive(Serialize, Deserialize)]
 pub struct PostalArea {
-    code: String,
+    pub code: String,
     streets: Vec<Street>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct City {
-    name: String,
+    pub name: String,
     areas: Vec<PostalArea>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Country {
-    code: String,
+    pub code: String,
     cities: Vec<City>,
 }
 
@@ -201,6 +202,9 @@ impl City {
             .ok()
             .map(|i| &self.areas[i])
     }
+    pub fn iter_zips(&self) -> impl Iterator<Item = &PostalArea> {
+        self.areas.iter()
+    }
 }
 
 impl Country {
@@ -243,6 +247,9 @@ impl Country {
             .binary_search_by_key(&city_name.to_lowercase(), |c| c.name.to_lowercase())
             .ok()
             .map(|i| &self.cities[i])
+    }
+    pub fn iter_cities(&self) -> impl Iterator<Item = &City> {
+        self.cities.iter()
     }
 }
 
@@ -309,13 +316,6 @@ impl World {
             })
         }
     }
-    // pub fn iter_country_codes_prefixed(&self, prefix: &str) -> impl Iterator<Item = &String> {
-    //     let prefix = prefix.to_string();
-    //     self.countries
-    //         .iter()
-    //         .map(|e| &e.code)
-    //         .filter(move |e| e.starts_with(&prefix))
-    // }
     pub fn count(&self) -> usize {
         self.countries.len()
     }
@@ -325,14 +325,22 @@ impl World {
             .ok()
             .map(|i| &self.countries[i])
     }
+    pub fn iter_countries(&self) -> impl Iterator<Item = &Country> {
+        self.countries.iter()
+    }
 }
 
-fn compress(streets: SortedVec<String>, hn: SortedVec<String>, mut addresses: Vec<Address>) {
+fn compress(
+    streets: SortedVec<String>,
+    hn: SortedVec<String>,
+    mut addresses: Vec<Address>,
+    incomplete_addresses: Vec<IncompleteAddress>,
+) {
     let mut world = World::new(streets, hn);
     let len = addresses.len();
     let mut i = 0;
     while let Some(addr) = addresses.pop() {
-        if i % 10000 == 0 {
+        if i % 100_000 == 0 {
             info!("Insert address {}/{} into world data structure", i, len);
             addresses.shrink_to_fit();
         }
@@ -347,6 +355,29 @@ fn compress(streets: SortedVec<String>, hn: SortedVec<String>, mut addresses: Ve
     }
     info!("Sorting every wolrd entry...");
     world.sort();
+
+    info!(
+        "Trying to autofix {} addresses.",
+        incomplete_addresses.len()
+    );
+    let (fixed, unfixed) = try_autofixing(&world, incomplete_addresses);
+    info!(
+        "Fixed {} addresses, {} were unfixable.",
+        fixed.len(),
+        unfixed.len()
+    );
+    for addr in fixed.into_iter() {
+        world.insert_address(
+            addr.country,
+            addr.city,
+            addr.postcode,
+            addr.street,
+            addr.housenumber,
+        )
+    }
+    info!("Sort again...");
+    world.sort();
+
     info!(
         "Done. Dumping world containing {} countries to stdout...",
         world.count()
@@ -360,22 +391,36 @@ pub fn read_and_compress() -> Result<(), String> {
     info!("Reading jsonl from stdin...");
     let stdin = io::stdin().lock();
     let mut addresses: Vec<Address> = Vec::new();
+    let mut incomplete_addresses: Vec<IncompleteAddress> = Vec::new();
     let mut streets: HashSet<String> = HashSet::new();
     let mut uncompressable_house_numbers: HashSet<String> = HashSet::new();
     for (i, item) in iter_items(stdin).enumerate() {
-        if i % 100000 == 0 {
+        if i % 100_000 == 0 {
             info!(
                 "Processed {} addresses, {} unique street names, {} unique uncompressable house numbers",
                   i, streets.len(), uncompressable_house_numbers.len());
         }
         let item = item?;
-        streets.insert(item.street.clone());
-        if !num_compressable(item.housenumber.as_str()) {
-            uncompressable_house_numbers.insert(item.housenumber.clone());
+        if let Some(street) = &item.street {
+            streets.insert(street.clone());
         }
-        addresses.push(item);
+        if let Some(hn) = &item.housenumber {
+            if !num_compressable(hn.as_str()) {
+                uncompressable_house_numbers.insert(hn.clone());
+            }
+        }
+        if item.is_complete() {
+            addresses.push(item.into_complete().unwrap());
+        } else {
+            incomplete_addresses.push(item);
+        }
     }
 
+    info!(
+        "Collected {} complete addresses, {} potentially fixable addresses.",
+        addresses.len(),
+        incomplete_addresses.len()
+    );
     info!("Sort streets ({})...", streets.len());
     let streets_sorted: SortedVec<String> = streets.into_iter().collect::<Vec<_>>().into();
     info!(
@@ -394,7 +439,12 @@ pub fn read_and_compress() -> Result<(), String> {
         housenumbers_sorted.len()
     );
 
-    compress(streets_sorted, housenumbers_sorted, addresses);
+    compress(
+        streets_sorted,
+        housenumbers_sorted,
+        addresses,
+        incomplete_addresses,
+    );
 
     Ok(())
 }

@@ -6,19 +6,31 @@ use log::{error, info};
 use parse::stdin_stdout_database;
 use serve::serve;
 
-use crate::compress::read_and_compress;
+use crate::{compress::read_and_compress, parse_coordinates::process_osm_pdf_to_stdout};
 
 mod api;
 mod compress;
 mod parse;
 mod serve;
 mod sorted_vec;
+mod autofix;
+mod parse_coordinates;
 
 
 pub const MAX_ITEMS_HEADER: &str = "max-items";
 
 #[derive(Parser, Debug)]
-struct BuildParameters {}
+struct ParseParameters {
+    /// File n .osm.pbf format
+    #[arg(short, long)]
+    input: PathBuf,
+    /// How many ways (shapes of houses) to keep in memory
+    /// while running through the file again searching the edges.
+    /// Higher value needs less passes and more RAM.
+    /// Choose 32M to use aroung 1GiB.
+    #[arg(short, long, default_value_t = 4_000_000)]
+    address_ways_batch_size: usize,
+}
 
 #[derive(Parser, Debug)]
 struct ServeParameters {
@@ -35,9 +47,12 @@ struct CompressParamters {}
 
 #[derive(Parser, Debug)]
 enum Subcommand {
-    Parse(BuildParameters),
-    Serve(ServeParameters),
+    /// Parse a *.osm.pbf file, json lines will be written to stdout
+    Parse(ParseParameters),
+    /// Read json lines, write compressed world object to stdout
     Compress(CompressParamters),
+    /// Serve a world object via HTTP
+    Serve(ServeParameters),
 }
 
 #[derive(Parser, Debug)]
@@ -58,7 +73,8 @@ fn setup_logger() {
                 message
             ))
         })
-        .level(log::LevelFilter::Info)
+        .filter(|e| e.target() == "macs" || e.target().starts_with("macs::"))
+        .level(log::LevelFilter::Debug)
         .chain(std::io::stderr())
         .apply()
         .unwrap()
@@ -69,11 +85,11 @@ fn main() -> Result<(), ()> {
     let args = Args::parse();
 
     match args.build {
-        Subcommand::Parse(_) => {
+        Subcommand::Parse(parse) => {
             info!("Reading osm.pbf from stdin...");
-            let x = stdin_stdout_database();
+            let x = process_osm_pdf_to_stdout(parse.input, parse.address_ways_batch_size);
             match x {
-                Err(e) => error!("{}", e),
+                Err(e) => error!("Error: {}", e),
                 Ok(()) => info!("Done!"),
             }
         }
