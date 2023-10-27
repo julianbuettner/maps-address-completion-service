@@ -78,7 +78,7 @@ fn avg_coords(it: impl Iterator<Item = Option<(i32, i32)>>) -> Option<(i32, i32)
 }
 
 struct CountingReader<R: Read> {
-    inner: R,
+    inner: BufReader<R>,
     count_fast: usize,
     count_count: usize,
     count_slow: Arc<Mutex<usize>>,
@@ -111,8 +111,9 @@ impl<R: Read> Read for CountingReader<R> {
 
 impl<R: Seek + Read> Seek for CountingReader<R> {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
-        self.count_fast = 0;
-        self.count_count = 0;
+        // Do not reset counters
+        // self.count_fast = 0;
+        // self.count_count = 0;
         self.inner.seek(pos)
     }
 }
@@ -123,7 +124,7 @@ impl<R: Read> CountingReader<R> {
         (
             Self {
                 count_slow: count.clone(),
-                inner: reader,
+                inner: BufReader::new(reader),
                 count_fast: 0,
                 count_count: 0,
             },
@@ -320,7 +321,7 @@ fn pass_two<R: Read + Seek>(
                 if node_ids_required_by_ways.contains(&node.id.0) {
                     required_node_ids_collected += 1;
                     node_coordinates.insert(node.id.0, (node.decimicro_lon, node.decimicro_lat));
-                } 
+                }
             }
         }
     }
