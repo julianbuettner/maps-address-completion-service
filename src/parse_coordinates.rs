@@ -1,11 +1,12 @@
 use multimap::MultiMap;
 use std::{
-    collections::HashMap,
+    cmp::max,
+    collections::{HashMap, HashSet},
     fs::OpenOptions,
     io::{self, BufReader, Read, Seek, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::Instant, cmp::max,
+    time::Instant,
 };
 
 use log::{error, info};
@@ -13,6 +14,8 @@ use num_format::{Locale, ToFormattedString};
 use osmpbfreader::{Node, NodeId, OsmObj, OsmPbfReader, Tags, Way};
 use serde::{Deserialize, Serialize};
 use smartstring::{LazyCompact, SmartString};
+
+use crate::sorted_vec::SortedVec;
 
 const ADDRESS_WAYS_BATCH_SIZE: usize = 4_000_000;
 
@@ -186,7 +189,8 @@ fn nice_print_pass_one(
     start: &Instant,
 ) {
     info!(
-        "Processed {} node addresses; {} address ways; {} entities in total, {} of input processed in {}s; {}/s in avg.",
+        "Pass 1: Processed {} node addresses; {} address ways; {} entities in total, \
+        {} of input processed in {}s; {}/s in avg.",
         node_address_count.to_formatted_string(&Locale::fr),
         way_count.to_formatted_string(&Locale::fr),
         entities.to_formatted_string(&Locale::fr),
@@ -205,86 +209,23 @@ fn reader_from_path_buf(path: PathBuf) -> Result<impl Read + Seek, String> {
     Ok(BufReader::new(reading))
 }
 
-fn nice_print_way_matching(elems_left: usize, coords_found: usize, bytes: usize) {
+fn nice_print_pass_two(
+    entities: usize,
+    required_node_ids_collected: usize,
+    ways_matched: usize,
+    bytes: usize,
+    start: &Instant,
+) {
     info!(
-        "Matching ways' node points, {} ways to go, {} coordinates found, parsed {} in search of nodes",
-        elems_left,
-        coords_found,
-        human_bytes::human_bytes(bytes as f64)
+        "Pass 2: Processed {} node coordinates; found {} ways, {} entities in this pass; \
+        {} of input processed in {}s, {}/s in avg.",
+        required_node_ids_collected,
+        ways_matched,
+        entities,
+        human_bytes::human_bytes(bytes as f64),
+        start.elapsed().as_secs(),
+        human_bytes::human_bytes(bytes as f64 / start.elapsed().as_secs_f64()),
     );
-}
-
-fn patch_address_ways<T: Read + Seek>(
-    reader: T,
-    address_ways: impl IntoIterator<Item = IncompleteWay>,
-    highest_node_id: i64,
-) -> Result<Vec<IncompleteAddressCoord>, String> {
-    let (reader, bytes_read) = CountingReader::new(reader);
-    let mut pbf_reader = OsmPbfReader::new(reader);
-    pbf_reader.rewind().map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    // Houses / shapes share nodes, so we need a multimap
-    let mut map: MultiMap<i64, IncompleteWay> = address_ways
-        .into_iter()
-        .map(|v| (v.min_unapplied().unwrap_or(i64::MAX), v))
-        .collect();
-
-    let mut last_node_id = i64::MIN;
-    let mut coords_found = 0;
-
-    for item in pbf_reader.par_iter() {
-        let item = item.map_err(|e| e.to_string())?;
-
-        let OsmObj::Node(n) = item else {
-            continue;
-        };
-        if n.id.0 <= last_node_id {
-            return Err(format!(
-                "Node {} followed node {}. Expect osm.pbf nodes to be sorted by id (ascending).",
-                n.id.0, last_node_id
-            ));
-        }
-        let current_node_id = n.id.0;
-        last_node_id = current_node_id;
-        if current_node_id > highest_node_id {
-            // There are no more nodes in this file. Stop.
-            // break;
-        }
-
-        let inc = map.remove(&n.id.0);
-        let Some(incomplete_ways) = inc else {
-            continue;
-        };
-        for mut incomplete_way in incomplete_ways.into_iter() {
-            coords_found += 1;
-            incomplete_way.apply(n.clone()).expect("Should have contained key");
-            let new_id = incomplete_way.min_unapplied().unwrap_or(i64::MAX);
-            assert!(new_id > current_node_id);
-            if coords_found % 1000 == 0 {
-                nice_print_way_matching(map.len(), coords_found, *bytes_read.lock().unwrap());
-            }
-            match incomplete_way.to_incomplete_address_coord() {
-                Err(incomplete_way) => {
-                    map.insert(new_id, incomplete_way);
-                }
-                Ok(complete_way) => result.push(complete_way),
-            }
-        }
-    }
-
-    if map.len() > 0 {
-        error!(
-            "First missing node: {}",
-            map.iter().map(|(key, _value)| key).min().unwrap()
-        );
-        return Err(format!(
-            "Failure trying to find nodes for ways. There are {} ways without all nodes matching. \
-            This is likely due to a corrupt *.osm.pbf file.",
-            map.len()
-        ));
-    }
-
-    Ok(result)
 }
 
 fn out_inc_addr_coord(
@@ -300,17 +241,16 @@ fn out_inc_addr_coord(
     Ok(())
 }
 
-pub fn process_osm_pdf_to_stdout(input: PathBuf, address_ways_batch_size: usize) -> Result<(), String> {
-    let mut stdout = io::stdout().lock();
-    let (reader, bytes_read) = CountingReader::new(reader_from_path_buf(input.clone())?);
-
-    let mut pbf = osmpbfreader::OsmPbfReader::new(reader);
-
-    let mut address_ways: Vec<IncompleteWay> = Vec::new();
+pub fn pass_one<R: Read>(
+    pbf: &mut OsmPbfReader<R>,
+    bytes_read: &Mutex<usize>,
+    start: &Instant,
+    out: &mut impl Write,
+) -> Result<HashSet<i64>, String> {
+    // output all nodes, collect node ids required for ways
+    let mut node_ids_required_by_ways = HashSet::new();
     let mut address_node_count: usize = 0;
     let mut address_way_count: usize = 0;
-    let mut highest_node_id: i64 = i64::MIN;
-    let start = Instant::now();
     let mut entity_count: usize = 0;
 
     for obj in pbf.par_iter() {
@@ -324,7 +264,6 @@ pub fn process_osm_pdf_to_stdout(input: PathBuf, address_ways_batch_size: usize)
                 &start,
             );
         }
-
         let obj = obj.map_err(|e| format!("{:?}", e))?;
         let tags = match &obj {
             OsmObj::Way(w) => &w.tags,
@@ -338,27 +277,12 @@ pub fn process_osm_pdf_to_stdout(input: PathBuf, address_ways_batch_size: usize)
             OsmObj::Relation(_) => (), // ignore relations
             OsmObj::Way(way) => {
                 address_way_count += 1;
-                address_ways.push(IncompleteWay::new(way));
-                if address_ways.len() >= address_ways_batch_size {
-                    info!(
-                        "Searching node coordinates for batch of ways {}...",
-                        address_ways.len()
-                    );
-                    let complete_address_coords = patch_address_ways(
-                        reader_from_path_buf(input.clone())?,
-                        address_ways.drain(0..),
-                        // ASSUMPTION file contains all node ids required for a way
-                        // before cointaining the way
-                        highest_node_id,
-                    )?;
-                    for complete in complete_address_coords {
-                        out_inc_addr_coord(&mut stdout, &complete)?;
-                    }
+                for node_id in way.nodes.into_iter() {
+                    node_ids_required_by_ways.insert(node_id.0);
                 }
             }
             OsmObj::Node(node) => {
                 address_node_count += 1;
-                highest_node_id = max(highest_node_id, node.id.0);
                 let tags = node.tags;
                 let inc = IncompleteAddressCoord {
                     housenumber: tags.get("addr:housenumber").cloned().unwrap(),
@@ -369,23 +293,114 @@ pub fn process_osm_pdf_to_stdout(input: PathBuf, address_ways_batch_size: usize)
                     lat: node.decimicro_lat,
                     long: node.decimicro_lon,
                 };
-                out_inc_addr_coord(&mut stdout, &inc)?;
+                out_inc_addr_coord(out, &inc)?;
+            }
+        }
+    }
+    Ok(node_ids_required_by_ways)
+}
+
+fn pass_two<R: Read + Seek>(
+    pbf: &mut OsmPbfReader<R>,
+    bytes_read: &Mutex<usize>,
+    node_ids_required_by_ways: HashSet<i64>,
+    start: &Instant,
+    out: &mut impl Write,
+) -> Result<(), String> {
+    pbf.rewind()
+        .map_err(|e| format!("Failed to rewind osm.pbf file: {}", e.to_string()))?;
+    let mut entity_count: usize = 0;
+    let mut required_node_ids_collected: usize = 0;
+    let mut ways_matched: usize = 0;
+    let mut node_coordinates: HashMap<i64, (i32, i32)> = HashMap::new();
+
+    for obj in pbf.par_iter() {
+        entity_count += 1;
+        if entity_count % 4_000_000 == 0 {
+            nice_print_pass_two(
+                entity_count,
+                required_node_ids_collected,
+                ways_matched,
+                *bytes_read.lock().unwrap(),
+                start,
+            )
+        }
+        let obj = obj.map_err(|e| format!("{:?}", e))?;
+        let tags = match &obj {
+            OsmObj::Way(w) => &w.tags,
+            OsmObj::Node(n) => &n.tags,
+            OsmObj::Relation(r) => &r.tags,
+        };
+        if !is_address(&tags) {
+            continue;
+        }
+        match obj {
+            OsmObj::Relation(_) => (),
+            OsmObj::Way(way) => {
+                let node_coordinates = way
+                    .nodes
+                    .iter()
+                    .map(|NodeId(node_id)| node_coordinates.get(node_id).map(|(a, b)| (*a, *b)));
+                let average_coordinates = avg_coords(node_coordinates);
+
+                if average_coordinates.is_none() {
+                    return Err(format!(
+                        "Way {} requires nodes which have not been read yet",
+                        way.id.0
+                    ));
+                }
+                ways_matched += 1;
+                let (decimicro_lat, decimicro_lon) = average_coordinates.unwrap();
+                let tags = way.tags;
+                let inc = IncompleteAddressCoord {
+                    housenumber: tags.get("addr:housenumber").cloned().unwrap(),
+                    street: tags.get("addr:street").cloned().unwrap(),
+                    zip: tags.get("addr:postcode").cloned(),
+                    city: tags.get("addr:postcode").cloned(),
+                    country: tags.get("addr:postcode").cloned(),
+                    lat: decimicro_lat,
+                    long: decimicro_lon,
+                };
+                out_inc_addr_coord(out, &inc)?;
+            }
+            OsmObj::Node(node) => {
+                if node_ids_required_by_ways.contains(&node.id.0) {
+                    required_node_ids_collected += 1;
+                    node_coordinates.insert(node.id.0, (node.decimicro_lon, node.decimicro_lat));
+                }
             }
         }
     }
 
-    info!(
-        "Searching node coordinates for batch of ways {}...",
-        address_ways.len()
-    );
-    let complete_address_coords = patch_address_ways(
-        reader_from_path_buf(input.clone())?,
-        address_ways.drain(0..),
-        highest_node_id,
+    Ok(())
+}
+
+pub fn process_osm_pdf_to_stdout(input: PathBuf) -> Result<(), String> {
+    let mut stdout = io::stdout().lock();
+    let (reader, bytes_read) = CountingReader::new(reader_from_path_buf(input.clone())?);
+
+    let mut pbf = osmpbfreader::OsmPbfReader::new(reader);
+    let start = Instant::now();
+    let node_ids_required_by_ways = pass_one(&mut pbf, &bytes_read, &start, &mut stdout)?;
+    pass_two(
+        &mut pbf,
+        &bytes_read,
+        node_ids_required_by_ways,
+        &start,
+        &mut stdout,
     )?;
-    for complete in complete_address_coords {
-        out_inc_addr_coord(&mut stdout, &complete)?;
-    }
+    // info!(
+    //     "Searching node coordinates for batch of ways {}...",
+    //     address_ways.len()
+    // );
+    // let complete_address_coords = patch_address_ways(
+    //     reader_from_path_buf(input.clone())?,
+    //     address_ways.drain(0..),
+    //     highest_node_id,
+    // )?;
+    // for complete in complete_address_coords {
+    //     out_inc_addr_coord(&mut stdout, &complete)?;
+    // }
     info!("Done");
     Ok(())
 }

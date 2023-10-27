@@ -24,12 +24,6 @@ struct ParseParameters {
     /// File n .osm.pbf format
     #[arg(short, long)]
     input: PathBuf,
-    /// How many ways (shapes of houses) to keep in memory
-    /// while running through the file again searching the edges.
-    /// Higher value needs less passes and more RAM.
-    /// Choose 32M to use aroung 1GiB.
-    #[arg(short, long, default_value_t = 4_000_000)]
-    address_ways_batch_size: usize,
 }
 
 #[derive(Parser, Debug)]
@@ -87,7 +81,7 @@ fn main() -> Result<(), ()> {
     match args.build {
         Subcommand::Parse(parse) => {
             info!("Reading osm.pbf from stdin...");
-            let x = process_osm_pdf_to_stdout(parse.input, parse.address_ways_batch_size);
+            let x = process_osm_pdf_to_stdout(parse.input);
             match x {
                 Err(e) => error!("Error: {}", e),
                 Ok(()) => info!("Done!"),

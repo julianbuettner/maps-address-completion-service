@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::{ops::Deref, collections::HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -42,5 +42,12 @@ impl<T: Ord> From<Vec<T>> for SortedVec<T> {
     fn from(mut value: Vec<T>) -> Self {
         value.sort();
         Self(value)
+    }
+}
+
+impl<T: Ord> From<HashSet<T>> for SortedVec<T> {
+    fn from(value: HashSet<T>) -> Self {
+        let vec: Vec<T> = value.into_iter().collect();
+        vec.into()
     }
 }
