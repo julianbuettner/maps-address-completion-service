@@ -213,16 +213,18 @@ fn nice_print_pass_two(
     entities: usize,
     required_node_ids_collected: usize,
     ways_matched: usize,
+    way_backlog: usize,
     bytes: usize,
     start: &Instant,
 ) {
     info!(
         "Pass 2: Processed {} node coordinates; found {} ways, {} entities in this pass; \
-        {} of input processed in {}s, {}/s in avg.",
+        {} ways in backlog; {} of input processed in {}s, {}/s in avg.",
         required_node_ids_collected,
         ways_matched,
         entities,
         human_bytes::human_bytes(bytes as f64),
+        way_backlog,
         start.elapsed().as_secs(),
         human_bytes::human_bytes(bytes as f64 / start.elapsed().as_secs_f64()),
     );
@@ -313,6 +315,7 @@ fn pass_two<R: Read + Seek>(
     let mut required_node_ids_collected: usize = 0;
     let mut ways_matched: usize = 0;
     let mut node_coordinates: HashMap<i64, (i32, i32)> = HashMap::new();
+    let mut way_backlog: Vec<Way> = Vec::new();
 
     for obj in pbf.par_iter() {
         entity_count += 1;
@@ -321,6 +324,7 @@ fn pass_two<R: Read + Seek>(
                 entity_count,
                 required_node_ids_collected,
                 ways_matched,
+                way_backlog.len(),
                 *bytes_read.lock().unwrap(),
                 start,
             )
@@ -344,10 +348,8 @@ fn pass_two<R: Read + Seek>(
                 let average_coordinates = avg_coords(node_coordinates);
 
                 if average_coordinates.is_none() {
-                    return Err(format!(
-                        "Way {} requires nodes which have not been read yet",
-                        way.id.0
-                    ));
+                    way_backlog.push(way);
+                    continue;
                 }
                 ways_matched += 1;
                 let (decimicro_lat, decimicro_lon) = average_coordinates.unwrap();
@@ -370,6 +372,30 @@ fn pass_two<R: Read + Seek>(
                 }
             }
         }
+    }
+    info!("Process backlog of {} ways...", way_backlog.len());
+    for way in way_backlog {
+        let node_coordinates = way
+            .nodes
+            .iter()
+            .map(|NodeId(node_id)| node_coordinates.get(node_id).map(|(a, b)| (*a, *b)));
+        let average_coordinates = avg_coords(node_coordinates);
+        if average_coordinates.is_none() {
+            return Err(format!("Way {} is missing node coordinates! Corrupt *osm.pbf?", way.id.0));
+        }
+        ways_matched += 1;
+        let (decimicro_lat, decimicro_lon) = average_coordinates.unwrap();
+        let tags = way.tags;
+        let inc = IncompleteAddressCoord {
+            housenumber: tags.get("addr:housenumber").cloned().unwrap(),
+            street: tags.get("addr:street").cloned().unwrap(),
+            zip: tags.get("addr:postcode").cloned(),
+            city: tags.get("addr:postcode").cloned(),
+            country: tags.get("addr:postcode").cloned(),
+            lat: decimicro_lat,
+            long: decimicro_lon,
+        };
+        out_inc_addr_coord(out, &inc)?;
     }
 
     Ok(())
