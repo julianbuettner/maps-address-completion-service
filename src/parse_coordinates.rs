@@ -1,19 +1,22 @@
 use multimap::MultiMap;
 use std::{
     cmp::max,
-    collections::{HashMap, HashSet},
-    fs::OpenOptions,
+    collections::{BTreeMap, HashMap, HashSet},
+    fs::{File, OpenOptions},
     io::{self, BufReader, Read, Seek, Write},
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Instant, Duration},
 };
+use swapvec::{Compression, SwapVec};
 
 use log::{error, info};
 use num_format::{Locale, ToFormattedString};
-use osmpbfreader::{Node, NodeId, OsmObj, OsmPbfReader, Tags, Way};
+use osmpbfreader::{Node, NodeId, OsmId, OsmObj, OsmPbfReader, Relation, Tags, Way};
 use serde::{Deserialize, Serialize};
 use smartstring::{LazyCompact, SmartString};
+
+use crate::verbose_reader::VerboseReader;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IncompleteAddressCoord {
@@ -65,16 +68,15 @@ impl IncompleteAddress {
     }
 }
 
-fn avg_coords(it: impl Iterator<Item = Option<(i32, i32)>>) -> Option<(i32, i32)> {
+fn avg_coords(it: impl Iterator<Item = (i32, i32)>) -> (i32, i32) {
     let (mut a, mut b) = (0, 0);
     let mut count = 0;
-    for item in it {
+    for (aa, bb) in it {
         count += 1;
-        let (aa, bb) = item?;
         a += aa as i64;
         b += bb as i64;
     }
-    Some(((a / count) as i32, (b / count) as i32))
+    ((a / count) as i32, (b / count) as i32)
 }
 
 struct CountingReader<R: Read> {
@@ -137,244 +139,125 @@ fn is_address(t: &Tags) -> bool {
     t.get("addr:housenumber").is_some() && t.get("addr:street").is_some()
 }
 
-fn nice_print_pass_one(
-    entities: usize,
-    way_count: usize,
-    node_address_count: usize,
-    bytes: usize,
-    start: &Instant,
-) {
-    info!(
-        "Pass 1: Processed {} node addresses; {} address ways; {} entities in total, \
-        {} of input processed in {}s; {}/s in avg.",
-        node_address_count.to_formatted_string(&Locale::fr),
-        way_count.to_formatted_string(&Locale::fr),
-        entities.to_formatted_string(&Locale::fr),
-        human_bytes::human_bytes(bytes as f64),
-        start.elapsed().as_secs(),
-        human_bytes::human_bytes(bytes as f64 / start.elapsed().as_secs_f64()),
-    )
+fn node_to_address(
+    Node {
+        id: _,
+        tags,
+        decimicro_lat,
+        decimicro_lon,
+    }: Node,
+) -> Result<IncompleteAddressCoord, String> {
+    IncompleteAddressCoord::from_tags_and_coords(tags, decimicro_lon, decimicro_lat)
+        .ok_or(format!("TODO"))
 }
 
-fn reader_from_path_buf(path: PathBuf) -> Result<impl Read + Seek, String> {
-    let reading = OpenOptions::new()
+fn way_to_cordinates(
+    Way { id, tags: _, nodes }: Way,
+    tree: &BTreeMap<OsmId, OsmObj>,
+) -> Result<(i32, i32), String> {
+    let coordinates: Result<Vec<(i32, i32)>, String> = nodes
+        .iter()
+        .map(|node_id| tree.get(&OsmId::Node(node_id.clone())))
+        .map(|node| match node {
+            None => Err(format!("Way {} references to not existing node id.", id.0)),
+            Some(OsmObj::Way(w)) => Err(format!(
+                "Way {} references to way {}. Not a node.",
+                id.0, w.id.0
+            )),
+            Some(OsmObj::Relation(r)) => Err(format!(
+                "Way {} references to relation {}. Not a node.",
+                id.0, r.id.0
+            )),
+            Some(OsmObj::Node(n)) => Ok((n.decimicro_lon, n.decimicro_lat)),
+        })
+        .collect();
+    Ok(avg_coords(coordinates?.into_iter()))
+}
+
+fn way_to_address(
+    way: Way,
+    tree: &BTreeMap<OsmId, OsmObj>,
+) -> Result<IncompleteAddressCoord, String> {
+    let (long, lat) = way_to_cordinates(way.clone(), tree)?;
+    IncompleteAddressCoord::from_tags_and_coords(way.tags, long, lat)
+        .ok_or("Missing housenumber or street".into())
+}
+
+fn relation_to_coordinates(
+    relation: Relation,
+    tree: &BTreeMap<OsmId, OsmObj>,
+) -> Result<(i32, i32), String> {
+    let result: Result<Vec<(i32, i32)>, String> = relation
+        .refs
+        .into_iter()
+        .map(|id| match tree.get(&id.member) {
+            None => Err(format!("TODO")),
+            Some(OsmObj::Node(node)) => Ok((node.decimicro_lon, node.decimicro_lat)),
+            Some(OsmObj::Relation(rel)) => relation_to_coordinates(rel.clone(), tree),
+            Some(OsmObj::Way(way)) => way_to_cordinates(way.clone(), tree),
+        })
+        .collect();
+    Ok(avg_coords(result?.into_iter()))
+}
+
+fn relation_to_address(
+    relation: Relation,
+    tree: &BTreeMap<OsmId, OsmObj>,
+) -> Result<IncompleteAddressCoord, String> {
+    let (long, lat) = relation_to_coordinates(relation.clone(), tree)?;
+    IncompleteAddressCoord::from_tags_and_coords(relation.tags, long, lat)
+        .ok_or("Missing street or housenumber".into())
+}
+
+fn reader_from_path_buf(path: PathBuf) -> Result<File, String> {
+    OpenOptions::new()
         .read(true)
         .create(false)
         .open(path)
-        .map_err(|e| e.to_string())?;
-    Ok(BufReader::new(reading))
-}
-
-fn nice_print_pass_two(
-    entities: usize,
-    required_node_ids_collected: usize,
-    ways_matched: usize,
-    way_backlog: usize,
-    bytes: usize,
-    start: &Instant,
-) {
-    info!(
-        "Pass 2: Processed {} node coordinates; found {} ways, {} entities in this pass; \
-        {} ways in backlog; {} of input processed in {}s, {}/s in avg.",
-        required_node_ids_collected,
-        ways_matched,
-        entities,
-        way_backlog,
-        human_bytes::human_bytes(bytes as f64),
-        start.elapsed().as_secs(),
-        human_bytes::human_bytes(bytes as f64 / start.elapsed().as_secs_f64()),
-    );
-}
-
-fn out_inc_addr_coord(
-    writer: &mut impl Write,
-    elem: &IncompleteAddressCoord,
-) -> Result<(), String> {
-    writer
-        .write_all(&serde_json::to_string(&elem).unwrap().as_bytes())
-        .map_err(|e| e.to_string())?;
-    writer
-        .write_all(&"\n".as_bytes())
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-pub fn pass_one<R: Read>(
-    pbf: &mut OsmPbfReader<R>,
-    bytes_read: &Mutex<usize>,
-    start: &Instant,
-    out: &mut impl Write,
-) -> Result<HashSet<i64>, String> {
-    // output all nodes, collect node ids required for ways
-    let mut node_ids_required_by_ways = HashSet::new();
-    let mut address_node_count: usize = 0;
-    let mut address_way_count: usize = 0;
-    let mut entity_count: usize = 0;
-
-    for obj in pbf.par_iter() {
-        entity_count += 1;
-        if entity_count % 4_000_000 == 0 {
-            nice_print_pass_one(
-                entity_count,
-                address_way_count,
-                address_node_count,
-                *bytes_read.lock().unwrap(),
-                &start,
-            );
-        }
-        let obj = obj.map_err(|e| format!("{:?}", e))?;
-        let tags = match &obj {
-            OsmObj::Way(w) => &w.tags,
-            OsmObj::Node(n) => &n.tags,
-            OsmObj::Relation(r) => &r.tags,
-        };
-        if !is_address(&tags) {
-            continue;
-        }
-        match obj {
-            OsmObj::Relation(_) => (), // ignore relations
-            OsmObj::Way(way) => {
-                if !is_address(&way.tags) {
-                    continue;
-                }
-                address_way_count += 1;
-                for node_id in way.nodes.into_iter() {
-                    node_ids_required_by_ways.insert(node_id.0);
-                }
-            }
-            OsmObj::Node(node) => {
-                address_node_count += 1;
-                let inc = IncompleteAddressCoord::from_incomplete_address_and_coords(
-                    IncompleteAddress::from_tags(node.tags).unwrap(),
-                    node.decimicro_lon,
-                    node.decimicro_lat,
-                );
-                out_inc_addr_coord(out, &inc)?;
-            }
-        }
-    }
-    Ok(node_ids_required_by_ways)
-}
-
-// fn process_backlog(backlog: Vec<Way>, node_coordinates: HashMap<i64, (i32, i32)>) -> Result<Vec<Way>, String> {
-//     let mut new_backlog = Vec::new();
-//     for way in backlog {
-//     }
-//     Ok(backlog)
-// }
-
-fn pass_two<R: Read + Seek>(
-    pbf: &mut OsmPbfReader<R>,
-    bytes_read: &Mutex<usize>,
-    node_ids_required_by_ways: HashSet<i64>,
-    start: &Instant,
-    out: &mut impl Write,
-) -> Result<(), String> {
-    pbf.rewind()
-        .map_err(|e| format!("Failed to rewind osm.pbf file: {}", e.to_string()))?;
-    let mut entity_count: usize = 0;
-    let mut required_node_ids_collected: usize = 0;
-    let mut ways_matched: usize = 0;
-    let mut node_coordinates: HashMap<i64, (i32, i32)> = HashMap::new();
-    let mut way_backlog: Vec<Way> = Vec::new();
-
-    for obj in pbf.par_iter() {
-        entity_count += 1;
-        if entity_count % 4_000_000 == 0 {
-            nice_print_pass_two(
-                entity_count,
-                required_node_ids_collected,
-                ways_matched,
-                way_backlog.len(),
-                *bytes_read.lock().unwrap(),
-                start,
-            )
-        }
-        let obj = obj.map_err(|e| format!("{:?}", e))?;
-        match obj {
-            OsmObj::Relation(_) => (),
-            OsmObj::Way(way) => {
-                if !is_address(&way.tags) {
-                    continue;
-                }
-                let node_coordinates = way
-                    .nodes
-                    .iter()
-                    .map(|NodeId(node_id)| node_coordinates.get(node_id).map(|(a, b)| (*a, *b)));
-                let average_coordinates = avg_coords(node_coordinates);
-
-                if average_coordinates.is_none() {
-                    way_backlog.push(way);
-                    continue;
-                }
-                ways_matched += 1;
-                let (decimicro_lon, decimicro_lat) = average_coordinates.unwrap();
-                let inc = IncompleteAddressCoord::from_tags_and_coords(
-                    way.tags,
-                    decimicro_lon,
-                    decimicro_lat,
-                )
-                .unwrap();
-                out_inc_addr_coord(out, &inc)?;
-            }
-            OsmObj::Node(node) => {
-                if node_ids_required_by_ways.contains(&node.id.0) {
-                    required_node_ids_collected += 1;
-                    node_coordinates.insert(node.id.0, (node.decimicro_lon, node.decimicro_lat));
-                }
-            }
-        }
-    }
-    info!("Process backlog of {} ways...", way_backlog.len());
-    for way in way_backlog {
-        let node_coordinates = way
-            .nodes
-            .iter()
-            .map(|NodeId(node_id)| node_coordinates.get(node_id).map(|(a, b)| (*a, *b)));
-        let average_coordinates = avg_coords(node_coordinates);
-        if average_coordinates.is_none() {
-            return Err(format!(
-                "Way {} is missing node coordinates! Corrupt *osm.pbf?",
-                way.id.0
-            ));
-        }
-        ways_matched += 1;
-        let (decimicro_lat, decimicro_lon) = average_coordinates.unwrap();
-        let inc =
-            IncompleteAddressCoord::from_tags_and_coords(way.tags, decimicro_lon, decimicro_lat)
-                .unwrap();
-        out_inc_addr_coord(out, &inc)?;
-    }
-
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 pub fn process_osm_pdf_to_stdout(input: PathBuf) -> Result<(), String> {
     let mut stdout = io::stdout().lock();
-    let (reader, bytes_read) = CountingReader::new(reader_from_path_buf(input.clone())?);
+    // let (reader, bytes_read) = CountingReader::new(reader_from_path_buf(input.clone())?);
+    let file = reader_from_path_buf(input.clone())?;
+    let meta = file
+        .metadata()
+        .map_err(|e| format!("Could not read file size: {}", e.to_string()))?;
+    let (reader, reader_manager) = VerboseReader::new(file, meta.len() as usize);
 
     let mut pbf = osmpbfreader::OsmPbfReader::new(reader);
-    let start = Instant::now();
-    let node_ids_required_by_ways = pass_one(&mut pbf, &bytes_read, &start, &mut stdout)?;
-    pass_two(
-        &mut pbf,
-        &bytes_read,
-        node_ids_required_by_ways,
-        &start,
-        &mut stdout,
-    )?;
-    // info!(
-    //     "Searching node coordinates for batch of ways {}...",
-    //     address_ways.len()
-    // );
-    // let complete_address_coords = patch_address_ways(
-    //     reader_from_path_buf(input.clone())?,
-    //     address_ways.drain(0..),
-    //     highest_node_id,
-    // )?;
-    // for complete in complete_address_coords {
-    //     out_inc_addr_coord(&mut stdout, &complete)?;
-    // }
-    info!("Done");
+    info!(
+        "Read file \"{}\" multiple times to resolve all relations between entries.",
+        input.as_os_str().to_str().unwrap_or("<invalid path>")
+    );
+    info!("This might take multiple minutes...");
+    let reader_manager = reader_manager.print_interval(Duration::from_secs(3));
+    reader_manager.start_printing();
+    let all_objects = pbf
+        .get_objs_and_deps(|obj| is_address(obj.tags()))
+        .map_err(|e| e.to_string())?;
+    reader_manager.stop_printing();
+
+    info!("Done! Output all objects...");
+    for (count, (_id, obj)) in all_objects.iter().enumerate() {
+        let tags = obj.tags();
+        if !is_address(tags) {
+            continue;
+        }
+        let addr = match obj {
+            OsmObj::Node(node) => node_to_address(node.clone())?,
+            OsmObj::Way(way) => way_to_address(way.clone(), &all_objects)?,
+            OsmObj::Relation(rel) => relation_to_address(rel.clone(), &all_objects)?,
+        };
+        serde_json::to_writer(&mut stdout, &addr).map_err(|e| e.to_string())?;
+        stdout
+            .write_all("\n".as_bytes())
+            .map_err(|e| e.to_string())?;
+        if count % 10_000 == 0 {
+            info!("{}K addresses processed", count / 1000);
+        }
+    }
+
     Ok(())
 }

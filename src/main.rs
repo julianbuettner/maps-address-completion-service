@@ -15,6 +15,7 @@ mod serve;
 mod sorted_vec;
 mod autofix;
 mod parse_coordinates;
+mod verbose_reader;
 
 
 pub const MAX_ITEMS_HEADER: &str = "max-items";
