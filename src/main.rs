@@ -25,6 +25,9 @@ struct ParseParameters {
     /// File n .osm.pbf format
     #[arg(short, long)]
     input: PathBuf,
+    /// File n .osm.pbf format
+    #[arg(short, long, default_value = "2048", help = "Try to use at most this amount of memory (in GiB)")]
+    gib: f32,
 }
 
 #[derive(Parser, Debug)]
@@ -82,7 +85,7 @@ fn main() -> Result<(), ()> {
     match args.build {
         Subcommand::Parse(parse) => {
             info!("Reading osm.pbf from stdin...");
-            let x = process_osm_pdf_to_stdout(parse.input);
+            let x = process_osm_pdf_to_stdout(parse.input, parse.mib);
             match x {
                 Err(e) => error!("Error: {}", e),
                 Ok(()) => info!("Done!"),

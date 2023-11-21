@@ -5,14 +5,22 @@ use std::{
     fs::{File, OpenOptions},
     io::{self, BufReader, Read, Seek, Write},
     path::PathBuf,
-    sync::{Arc, Mutex},
-    time::{Instant, Duration},
+    rc::Rc,
+    sync::{
+        mpsc::{channel, Receiver},
+        Arc, Mutex,
+    },
+    thread::spawn,
+    time::{Duration, Instant},
+    vec,
 };
 use swapvec::{Compression, SwapVec};
 
 use log::{error, info};
 use num_format::{Locale, ToFormattedString};
-use osmpbfreader::{Node, NodeId, OsmId, OsmObj, OsmPbfReader, Relation, Tags, Way};
+use osmpbfreader::{
+    reader::ObjAndDeps, Node, NodeId, OsmId, OsmObj, OsmPbfReader, Relation, Tags, Way,
+};
 use serde::{Deserialize, Serialize};
 use smartstring::{LazyCompact, SmartString};
 
@@ -66,6 +74,16 @@ impl IncompleteAddress {
             housenumber: t.get("addr:housenumber").cloned()?,
         })
     }
+}
+
+fn vec_to_btree(v: &Vec<Rc<ObjAndDeps>>) -> BTreeMap<OsmId, OsmObj> {
+    let mut t = BTreeMap::new();
+    for item in v {
+        t.insert(item.inner.id(), item.inner.clone());
+        let mut tt = vec_to_btree(&item.deps);
+        t.append(&mut tt);
+    }
+    t
 }
 
 fn avg_coords(it: impl Iterator<Item = (i32, i32)>) -> (i32, i32) {
@@ -217,8 +235,30 @@ fn reader_from_path_buf(path: PathBuf) -> Result<File, String> {
         .map_err(|e| e.to_string())
 }
 
-pub fn process_osm_pdf_to_stdout(input: PathBuf) -> Result<(), String> {
+fn output_items(elements: Receiver<(OsmObj, BTreeMap<OsmId, OsmObj>)>) -> Result<(), String> {
     let mut stdout = io::stdout().lock();
+    let mut count = 0;
+    while let Ok((obj, deps)) = elements.recv() {
+        let tags = obj.tags();
+        let addr = match obj {
+            OsmObj::Node(node) => node_to_address(node.clone())?,
+            OsmObj::Way(way) => way_to_address(way.clone(), &deps)?,
+            OsmObj::Relation(rel) => relation_to_address(rel.clone(), &deps)?,
+        };
+        serde_json::to_writer(&mut stdout, &addr).map_err(|e| e.to_string())?;
+        stdout
+            .write_all("\n".as_bytes())
+            .map_err(|e| e.to_string())?;
+        if count % 10_000 == 0 {
+            info!("{}K addresses processed", count / 1000);
+        }
+        count += 1;
+    }
+    Ok(())
+}
+
+pub fn process_osm_pdf_to_stdout(input: PathBuf, memory_gib: f32) -> Result<(), String> {
+    let memory_gib = max(memory_gib, 0.1);
     // let (reader, bytes_read) = CountingReader::new(reader_from_path_buf(input.clone())?);
     let file = reader_from_path_buf(input.clone())?;
     let meta = file
@@ -234,30 +274,24 @@ pub fn process_osm_pdf_to_stdout(input: PathBuf) -> Result<(), String> {
     info!("This might take multiple minutes...");
     let reader_manager = reader_manager.print_interval(Duration::from_secs(3));
     reader_manager.start_printing();
-    let all_objects = pbf
-        .get_objs_and_deps(|obj| is_address(obj.tags()))
-        .map_err(|e| e.to_string())?;
+    let (sender, recv) = channel();
+
+    let output_thread = spawn(|| output_items(recv));
+
+    pbf.get_objs_and_deps_on_the_fly(
+        |obj| is_address(obj.tags()),
+        |item| sender.send((item.inner, vec_to_btree(&item.deps))).unwrap(),
+        // 12 GiB for 6M objects
+        // 2 GiB for 1M objects
+        // 1 GiB for 500K objects
+        (memory_gib * 500_000.) as usize
+    );
     reader_manager.stop_printing();
 
-    info!("Done! Output all objects...");
-    for (count, (_id, obj)) in all_objects.iter().enumerate() {
-        let tags = obj.tags();
-        if !is_address(tags) {
-            continue;
-        }
-        let addr = match obj {
-            OsmObj::Node(node) => node_to_address(node.clone())?,
-            OsmObj::Way(way) => way_to_address(way.clone(), &all_objects)?,
-            OsmObj::Relation(rel) => relation_to_address(rel.clone(), &all_objects)?,
-        };
-        serde_json::to_writer(&mut stdout, &addr).map_err(|e| e.to_string())?;
-        stdout
-            .write_all("\n".as_bytes())
-            .map_err(|e| e.to_string())?;
-        if count % 10_000 == 0 {
-            info!("{}K addresses processed", count / 1000);
-        }
-    }
+    info!("Join stdout thread...");
+    drop(sender);
+    let _ = output_thread.join().map_err(|_| "Error joining thread".to_string())?;
+    info!("Joined.");
 
     Ok(())
 }
