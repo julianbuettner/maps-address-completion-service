@@ -14,7 +14,6 @@ use std::{
     time::{Duration, Instant},
     vec,
 };
-use swapvec::{Compression, SwapVec};
 
 use log::{error, info};
 use num_format::{Locale, ToFormattedString};
