@@ -85,7 +85,7 @@ fn main() -> Result<(), ()> {
     match args.build {
         Subcommand::Parse(parse) => {
             info!("Reading osm.pbf from stdin...");
-            let x = process_osm_pdf_to_stdout(parse.input, parse.mib);
+            let x = process_osm_pdf_to_stdout(parse.input, parse.gib);
             match x {
                 Err(e) => error!("Error: {}", e),
                 Ok(()) => info!("Done!"),

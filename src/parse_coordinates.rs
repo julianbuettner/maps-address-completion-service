@@ -258,7 +258,11 @@ fn output_items(elements: Receiver<(OsmObj, BTreeMap<OsmId, OsmObj>)>) -> Result
 }
 
 pub fn process_osm_pdf_to_stdout(input: PathBuf, memory_gib: f32) -> Result<(), String> {
-    let memory_gib = max(memory_gib, 0.1);
+    let memory_gib = if memory_gib < 0.1 {
+        memory_gib 
+    } else {
+        memory_gib
+    };
     // let (reader, bytes_read) = CountingReader::new(reader_from_path_buf(input.clone())?);
     let file = reader_from_path_buf(input.clone())?;
     let meta = file
