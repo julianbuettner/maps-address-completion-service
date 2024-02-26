@@ -4,6 +4,10 @@ Serve auto completions for addresses,
 like city names, zip codes, street names and house numbers.
 Useful for e.g. webforms where a valid address has to be entered manually.
 
+## Important Note
+Currently, the [Karlsruhe Schema](https://wiki.openstreetmap.org/wiki/DE:Proposed_features/House_numbers/Karlsruhe_Schema)
+Is not implemented, therefore a big percentage of addresses are missing.
+
 ## Feature
 - Works on OpenStreetMaps data
 - ~1ms response time, probably less
@@ -13,7 +17,7 @@ Useful for e.g. webforms where a valid address has to be entered manually.
 - Serve address of the entire globe* with 302MiB memory
 - 1s - 2s startup time to load all OSM addresses in existence
 
-\* OSM data is missing many cities, so it's very much incomplete.
+\* Kalrsruhe schema missing, continents like Africa not well covered.
 
 ## TLDR
 ```
@@ -134,16 +138,17 @@ injects faulty data. So please take those numbers with a big grain of salt.
 - The entire world has ca. 736.000 unique street names*
 - The entire world has ca. 378.000 unique house numbers which are not just integers (e.g. 1A)*
 
-\* Again, based on OSM Data, which is faulty and incomplete
+\* Again, Karlsruhe schema missing, continents like Africa not well covered.
 
 ## Contribute
-Contributions are very welcomed. If you wish any new features, feel free to open an issue.
+Contributions are very welcomed. If you want any new features, feel free to open an issue.
 When opening a pull request, please use `cargo fmt` and keep the code as simple as possible.
 
 ### Potential futures improvements
+- implement Karlsruhe schema to cover all addresses
 - search countries, by code and by name
 - skip one layer
     - given country, allow to list zip codes (no city)
     - given city, allow to list streets
 - When 404, specify what exactly has not been found
-- Do binary search whenever possible (improve SortedVec to contain search closure?)
+- Do binary search whenever possible (improve SortedVec interface?)
